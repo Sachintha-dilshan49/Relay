@@ -1,23 +1,28 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { HealthModule } from './health/health.module';
+import { RedisModule } from './redis/redis.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
     // ─── Config ─────────────────────────────────────────────────────────────
-    // Loads .env file and makes ConfigService available across all modules
     ConfigModule.forRoot({
-      isGlobal: true,       // No need to import ConfigModule in every module
+      isGlobal: true,
       envFilePath: '.env',
-      cache: true,          // Cache env values for performance
+      cache: true,
     }),
 
+    // ─── Infrastructure ──────────────────────────────────────────────────────
+    RedisModule,   // Global — available everywhere, no need to re-import
+
+    // ─── Auth ────────────────────────────────────────────────────────────────
+    AuthModule,    // Registers ApiKeyGuard globally via APP_GUARD
+
     // ─── Feature modules ─────────────────────────────────────────────────────
-    // Add new feature modules here as they are built
     HealthModule,
 
-    // TODO: Add these modules as contributors build them (see docs/Features.md)
-    // AuthModule,          → F-05
+    // TODO: Add as contributors build them (see docs/Features.md)
     // TenantsModule,       → F-06
     // ApiKeysModule,       → F-07
     // TemplatesModule,     → F-08
