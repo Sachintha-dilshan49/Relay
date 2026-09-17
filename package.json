@@ -1,0 +1,47 @@
+{
+  "name": "relay",
+  "version": "0.1.0",
+  "description": "Open-source notification infrastructure platform",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/dashboard",
+    "apps/workers/email-worker",
+    "apps/workers/sms-worker",
+    "apps/workers/push-worker",
+    "apps/workers/webhook-worker",
+    "packages/database",
+    "packages/shared-types",
+    "packages/shared-utils"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run start:dev --workspace=apps/api\" \"npm run dev --workspace=apps/dashboard\"",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "eslint . --ext .ts,.tsx --ignore-path .gitignore",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
+    "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace=packages/database",
+    "db:migrate": "npm run db:migrate --workspace=packages/database",
+    "db:studio": "npm run db:studio --workspace=packages/database",
+    "docker:dev": "docker compose -f infrastructure/docker/docker-compose.dev.yml up -d",
+    "docker:dev:down": "docker compose -f infrastructure/docker/docker-compose.dev.yml down",
+    "docker:up": "docker compose -f infrastructure/docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f infrastructure/docker/docker-compose.yml down"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.1.3",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

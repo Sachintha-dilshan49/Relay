@@ -1,0 +1,239 @@
+// Relay — Notification Infrastructure Platform
+// Database Schema
+// ORM: Prisma | Database: PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Channel {
+  EMAIL
+  SMS
+  PUSH
+  WEBHOOK
+}
+
+enum NotificationStatus {
+  QUEUED       // Accepted by API, waiting in queue
+  PROCESSING   // Worker has picked it up
+  DELIVERED    // Successfully sent
+  FAILED       // All retries exhausted
+  CANCELLED    // Manually cancelled before processing
+}
+
+enum DeliveryStatus {
+  SUCCESS
+  FAILURE
+}
+
+enum TemplateStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TENANT
+// Every organisation that uses the platform is a tenant.
+// All data is isolated per tenant.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Tenant {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique        // e.g. "acme-corp" — used in URLs
+  email       String   @unique        // billing / contact email
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  apiKeys       ApiKey[]
+  templates     Template[]
+  notifications Notification[]
+  channels      ChannelConfig[]
+  members       TenantMember[]
+
+  @@map("tenants")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TENANT MEMBER
+// Users who belong to a tenant (for dashboard access)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model TenantMember {
+  id        String   @id @default(uuid())
+  tenantId  String
+  email     String
+  role      String   @default("member") // "owner" | "admin" | "member"
+  createdAt DateTime @default(now())
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, email])
+  @@map("tenant_members")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API KEY
+// Authentication tokens for external apps to call the API.
+// The actual key value is hashed before storing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  tenantId    String
+  name        String                          // Human label e.g. "Production Key"
+  keyHash     String    @unique               // Hashed API key (never store plain)
+  keyPrefix   String                          // First 8 chars for UI display e.g. "oc_live_"
+  isActive    Boolean   @default(true)
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?                       // null = never expires
+  createdAt   DateTime  @default(now())
+
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHANNEL CONFIG
+// Per-tenant provider configuration.
+// e.g. Tenant A uses their own SendGrid key, Tenant B uses SMTP.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ChannelConfig {
+  id           String   @id @default(uuid())
+  tenantId     String
+  channel      Channel
+  provider     String                         // "sendgrid" | "smtp" | "twilio" | "fcm" etc.
+  configJson   Json                           // Encrypted provider credentials
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, channel])
+  @@map("channel_configs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEMPLATE
+// Reusable notification templates with dynamic placeholders.
+// e.g. "Hello {{name}}, your order {{orderId}} is confirmed."
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Template {
+  id          String         @id @default(uuid())
+  tenantId    String
+  name        String                             // Slug e.g. "order-confirmed"
+  description String?
+  channel     Channel
+  status      TemplateStatus @default(DRAFT)
+  subject     String?                            // Email subject line (email only)
+  body        String                             // Template body with {{placeholders}}
+  variables   String[]                           // List of expected variable names
+  version     Int            @default(1)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  notifications Notification[]
+
+  @@unique([tenantId, name, channel])
+  @@map("templates")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTIFICATION
+// Every notification request received by the API.
+// One record per API call to POST /notify.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id              String             @id @default(uuid())
+  tenantId        String
+  templateId      String?
+  channel         Channel
+  status          NotificationStatus @default(QUEUED)
+  recipient       String                              // Email / phone / device token / URL
+  subject         String?                             // Filled subject (email)
+  body            String                              // Filled body (after template rendering)
+  dataJson        Json?                               // Raw data passed with the request
+  idempotencyKey  String?                             // Dedup key from client
+  scheduledAt     DateTime?                           // For scheduled sends
+  queuedAt        DateTime           @default(now())
+  processedAt     DateTime?
+  deliveredAt     DateTime?
+  failedAt        DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  tenant          Tenant             @relation(fields: [tenantId], references: [id])
+  template        Template?          @relation(fields: [templateId], references: [id])
+  deliveryLogs    DeliveryLog[]
+  deadLetter      DeadLetter?
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status])
+  @@index([tenantId, channel])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DELIVERY LOG
+// One record per delivery attempt (including retries).
+// A notification can have multiple delivery logs.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DeliveryLog {
+  id             String         @id @default(uuid())
+  notificationId String
+  attemptNumber  Int                               // 1, 2, 3 ...
+  status         DeliveryStatus
+  provider       String                            // "sendgrid" | "twilio" etc.
+  providerMsgId  String?                           // Provider's message ID (if returned)
+  errorCode      String?                           // Provider error code on failure
+  errorMessage   String?                           // Human-readable error
+  durationMs     Int?                              // How long the send took (ms)
+  attemptedAt    DateTime       @default(now())
+
+  notification   Notification   @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([notificationId])
+  @@map("delivery_logs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEAD LETTER
+// Notifications that exhausted all retry attempts.
+// Stored separately for easy querying and manual retry from dashboard.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model DeadLetter {
+  id             String       @id @default(uuid())
+  notificationId String       @unique
+  reason         String                          // Why it ended up here
+  totalAttempts  Int
+  lastErrorCode  String?
+  lastError      String?
+  isRetried      Boolean      @default(false)   // Has someone manually retried it?
+  retriedAt      DateTime?
+  createdAt      DateTime     @default(now())
+
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@map("dead_letters")
+}

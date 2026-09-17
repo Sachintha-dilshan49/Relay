@@ -1,0 +1,51 @@
+version: '3.9'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Relay — Local Development Infrastructure
+# Starts only the infrastructure services (PostgreSQL + Redis).
+# Run your apps locally with: npm run dev
+#
+# Usage:
+#   Start:  docker compose -f infrastructure/docker/docker-compose.dev.yml up -d
+#   Stop:   docker compose -f infrastructure/docker/docker-compose.dev.yml down
+#   Logs:   docker compose -f infrastructure/docker/docker-compose.dev.yml logs -f
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: relay_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: relay_user
+      POSTGRES_PASSWORD: relay_pass
+      POSTGRES_DB: relay_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - relay_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relay_user -d relay_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: relay_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - relay_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  relay_postgres_data:
+  relay_redis_data:
